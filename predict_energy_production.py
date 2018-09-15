@@ -15,7 +15,7 @@ energy_train.drop(['utc_timestamp', 'cet_cest_timestamp'], axis=1, inplace=True)
 energy_train.set_index('timestamp', inplace=True)
 energy_train = energy_train[(energy_train.index >= datetime(2012,1,1)) & (energy_train.index < datetime(2016,12,31))]
 
-weather_train = pd.read_csv('data/weather_UTC_2012-2016.csv', sep=';', decimal=',')
+weather_train = pd.read_csv('data/weather_UTC_2012-2016_Berlin.csv', sep=';', decimal=',')
 weather_train.VALUE_TIME = pd.to_datetime(weather_train.VALUE_TIME)
 weather_train.set_index('VALUE_TIME', inplace=True)
 weather_train = weather_train[(weather_train.index>=datetime(2012, 1, 1)) & (weather_train.index < datetime(2016,12,31))]
