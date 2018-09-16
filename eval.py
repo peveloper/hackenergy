@@ -1,24 +1,18 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-import pandas as pd
-import numpy as np
-
-from datetime import datetime
-from pandas import concat
-from pandas import Series
-from pandas import DataFrame
-
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import mean_squared_error
-
-from keras.models import Sequential
 from keras.models import model_from_json
-from keras.layers import Dense
-from keras.layers import LSTM
+import numpy as np
+from sklearn.preprocessing import MinMaxScaler
+import pandas as pd
+from datetime import datetime
+from pandas import DataFrame
+from pandas import concat
 
-from math import sqrt
-
+json_file = open('model/model.json', 'r')
+loaded_model_json = json_file.read()
+json_file.close()
+lstm_model = model_from_json(loaded_model_json)
+# load weights into new model
+lstm_model.load_weights("model/model.h5")
+print("Loaded model from disk")
 
 def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
     n_vars = 1 if type(data) is list else data.shape[1]
@@ -43,6 +37,14 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
         agg.dropna(inplace=True)
     return agg
 
+
+def invert_scale(scaler, X, value):
+    new_row = [x for x in X] + [value]
+    array = np.array(new_row)
+    array = array.reshape(1, len(array))
+    inverted = scaler.inverse_transform(array)
+    return inverted[0, -1]
+
 def scale(train, test):
     # fit scaler
     scaler = MinMaxScaler(feature_range=(-1, 1))
@@ -55,33 +57,6 @@ def scale(train, test):
     test_scaled = scaler.transform(test)
     return scaler, train_scaled, test_scaled
 
-def invert_scale(scaler, X, value):
-    new_row = [x for x in X] + [value]
-    array = np.array(new_row)
-    array = array.reshape(1, len(array))
-    inverted = scaler.inverse_transform(array)
-    return inverted[0, -1]
- 
-# fit an LSTM network to training data
-def fit_lstm(train, batch_size, nb_epoch, neurons):
-    X, y = train[:, 0:-1], train[:, -1]
-    X = X.reshape(X.shape[0], 1, X.shape[1])
-    model = Sequential()
-    print(X.shape)
-    print(y.shape)
-    model.add(LSTM(neurons, batch_input_shape=(batch_size, X.shape[1], X.shape[2]), stateful=True))
-    model.add(Dense(1))
-    model.compile(loss='mean_squared_error', optimizer='adam')
-    for i in range(nb_epoch):
-        model.fit(X, y, epochs=1, batch_size=batch_size, verbose=1, shuffle=False)
-        model.reset_states()
-    return model, y
- 
-# make a one-step forecast
-def forecast_lstm(model, batch_size, X):
-    X = X.reshape(1, 1, len(X))
-    yhat = model.predict(X, batch_size=batch_size)
-    return yhat[0,0]
 
 consumption = pd.read_csv('data/production_consumption_2012_2016_scaled.csv', sep=';', decimal=',')
 consumption['timestamp'] = pd.to_datetime(consumption['cet_cest_timestamp'])
@@ -113,6 +88,9 @@ X = w.merge(consumption, how='outer', left_index=True, right_index=True)
 
 tfd = series_to_supervised(X.values, 1, 1, True)
 
+print(tfd.shape)
+
+
 # split data into train and test-sets
 train, test = tfd.values[0:-10000], tfd.values[-10000:]
 # transform the scale of the data
@@ -122,11 +100,26 @@ print(train_scaled.shape)
 print(test_scaled.shape)
 
 
-# fit the model
-lstm_model = fit_lstm(train_scaled, 1, 1, 4)
-train_scaled = train_scaled[:,0:-1]
-train_scaled = train_scaled.reshape(train_scaled.shape[0], 1, train_scaled.shape[1])
-Y_train, Y_pred = lstm_model.predict(train_scaled, batch_size=1, verbose=2)
+def forecast_lstm(model, batch_size, X):
+    X = X.reshape(1, 1, len(X))
+    yhat = model.predict(X, batch_size=batch_size)
+    return yhat[0,0]
+
+# X = tfd.values
+# X = X[:,:-1]
+# print(X.shape)
+# Y = tfd.values
+# Y = Y[:,-1:]
+# print(Y.shape)
+
+# X = X.reshape(X.shape[0], 1, X.shape[1])
+# Y = Y.reshape(Y.shape[0], Y.shape[1])
+
+
+# print(X.shape)
+# print(Y.shape)
+
+lstm_model.compile(loss='mean_squared_error', optimizer='adam', metrics=['accuracy'])
 
 # walk-forward validation on the test data
 predictions = list()
@@ -137,19 +130,14 @@ for i in range(len(test_scaled)):
     yhat = forecast_lstm(lstm_model, 1, X)
     # invert scaling
     yhat = invert_scale(scaler, X, yhat)
+    y = invert_scale(scaler, X, y)
     # store forecast
     predictions.append(yhat)
     ys.append(y)
 
+with open('pred.txt', 'w') as file:
+        file.write(str(ys))
+        file.write('\n')
+        file.write(str(predictions))
 
-# report performance
-rmse = sqrt(mean_squared_error(ys, predictions))
-print('%d) Test RMSE: %.3f' % (1, rmse))
 
-
-model_json = lstm_model.to_json()
-with open("model.json", "w") as json_file:
-    json_file.write(model_json)
-    # serialize weights to HDF5
-    lstm_model.save_weights("model.h5")
-    print("Saved model to disk")
